@@ -1,0 +1,15 @@
+# Containerlab generated files
+clab-*/
+**/clab-*/
+.state.clab.yaml
+**/.state.clab.yaml
+*.clab.yaml
+
+# Containerlab TLS
+**/.tls/
+
+# Generated inventories
+**/ansible-inventory.yml
+**/nornir-simple-inventory.yml
+**/authorized_keys
+**/topology-data.json
