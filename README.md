@@ -1,20 +1,38 @@
 # Containerlab Network Labs
 
-Hands-on network architecture labs built with Containerlab, Docker and FRRouting.
+Hands-on network engineering and architecture labs built with:
 
-## Labs
+- Containerlab
+- FRRouting
+- Linux networking
+- Docker
+- BGP / OSPF
+- EVPN / VXLAN
+- VRF
+- Network Automation
+- Ansible
+- Go
 
-### 01 - eBGP Triangle
+This repository documents practical networking scenarios designed to build
+and demonstrate Network Engineer → Network Architect skills.
 
-Three FRRouting routers running in a Containerlab topology.
+---
+
+## Architecture Domains
+
+The labs are organized around several core networking domains:
 
 ```text
-                 R1
-              AS 65001
-             /        \
-            /          \
-     10.0.12.0/30   10.0.13.0/30
-          /              \
-         R2--------------R3
-      AS 65002        AS 65003
-              10.0.23.0/30
+                    Network Architecture
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+     Routing          Architecture        Automation
+        │                  │                  │
+   BGP / OSPF        EVPN / VXLAN         Ansible
+   Policy            VRF                  Go
+   RR                Multihoming          APIs
+        │                  │                  │
+        └──────────────────┼──────────────────┘
+                           │
+                    Troubleshooting

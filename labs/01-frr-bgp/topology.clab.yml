@@ -1,0 +1,41 @@
+name: frr-bgp
+
+topology:
+  nodes:
+    R1:
+      kind: linux
+      image: frrouting/frr:latest
+      binds:
+        - configs/R1/daemons:/etc/frr/daemons
+        - configs/R1/bgpd.conf:/etc/frr/bgpd.conf
+      exec:
+        - ip addr add 10.0.12.1/30 dev eth1
+        - ip addr add 10.0.13.1/30 dev eth2
+        - ip addr add 1.1.1.1/32 dev lo
+
+    R2:
+      kind: linux
+      image: frrouting/frr:latest
+      binds:
+        - configs/R2/daemons:/etc/frr/daemons
+        - configs/R2/bgpd.conf:/etc/frr/bgpd.conf
+      exec:
+        - ip addr add 10.0.12.2/30 dev eth1
+        - ip addr add 10.0.23.1/30 dev eth2
+        - ip addr add 2.2.2.2/32 dev lo
+
+    R3:
+      kind: linux
+      image: frrouting/frr:latest
+      binds:
+        - configs/R3/daemons:/etc/frr/daemons
+        - configs/R3/bgpd.conf:/etc/frr/bgpd.conf
+      exec:
+        - ip addr add 10.0.13.2/30 dev eth1
+        - ip addr add 10.0.23.2/30 dev eth2
+        - ip addr add 3.3.3.3/32 dev lo
+
+  links:
+    - endpoints: ["R1:eth1", "R2:eth1"]
+    - endpoints: ["R1:eth2", "R3:eth1"]
+    - endpoints: ["R2:eth2", "R3:eth2"]
