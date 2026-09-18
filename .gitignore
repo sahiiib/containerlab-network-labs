@@ -13,3 +13,6 @@ clab-*/
 **/nornir-simple-inventory.yml
 **/authorized_keys
 **/topology-data.json
+
+# OS files
+.DS_Store
