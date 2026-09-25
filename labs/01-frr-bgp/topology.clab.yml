@@ -21,7 +21,7 @@ topology:
         - configs/R2/bgpd.conf:/etc/frr/bgpd.conf
       exec:
         - ip addr add 10.0.12.2/30 dev eth1
-        - ip addr add 10.0.23.1/30 dev eth2
+        - ip addr add 10.0.24.1/30 dev eth2
         - ip addr add 2.2.2.2/32 dev lo
 
     R3:
@@ -32,10 +32,23 @@ topology:
         - configs/R3/bgpd.conf:/etc/frr/bgpd.conf
       exec:
         - ip addr add 10.0.13.2/30 dev eth1
-        - ip addr add 10.0.23.2/30 dev eth2
+        - ip addr add 10.0.34.1/30 dev eth2
         - ip addr add 3.3.3.3/32 dev lo
+
+    R4:
+      kind: linux
+      image: frrouting/frr:latest
+      binds:
+        - configs/R4/daemons:/etc/frr/daemons
+        - configs/R4/bgpd.conf:/etc/frr/bgpd.conf
+      exec:
+        - ip addr add 10.0.24.2/30 dev eth1
+        - ip addr add 10.0.34.2/30 dev eth2
+        - ip addr add 4.4.4.4/32 dev lo
+        - ip addr add 203.0.113.1/24 dev lo
 
   links:
     - endpoints: ["R1:eth1", "R2:eth1"]
     - endpoints: ["R1:eth2", "R3:eth1"]
-    - endpoints: ["R2:eth2", "R3:eth2"]
+    - endpoints: ["R2:eth2", "R4:eth1"]
+    - endpoints: ["R3:eth2", "R4:eth2"]
