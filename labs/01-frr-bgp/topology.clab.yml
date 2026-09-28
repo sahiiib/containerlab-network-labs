@@ -19,6 +19,7 @@ topology:
       binds:
         - configs/R2/daemons:/etc/frr/daemons
         - configs/R2/bgpd.conf:/etc/frr/bgpd.conf
+        - configs/R2/bfdd.conf:/etc/frr/bfdd.conf
       exec:
         - ip addr add 10.0.12.2/30 dev eth1
         - ip addr add 10.0.24.1/30 dev eth2
@@ -41,6 +42,7 @@ topology:
       binds:
         - configs/R4/daemons:/etc/frr/daemons
         - configs/R4/bgpd.conf:/etc/frr/bgpd.conf
+        - configs/R4/bfdd.conf:/etc/frr/bfdd.conf
       exec:
         - ip addr add 10.0.24.2/30 dev eth1
         - ip addr add 10.0.34.2/30 dev eth2
