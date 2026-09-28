@@ -333,6 +333,66 @@ Detailed results are documented in:
 docs/test-results.md
 ```
 
+### Test 3D — End-to-End Health Tracking
+
+BGP and BFD remain healthy while a remote health target becomes unreachable.
+
+A dedicated probe address is used:
+
+```text
+198.51.100.1/32
+```
+
+The health-check route is pinned through the primary R2 path:
+
+```text
+R1 -> R2 -> R4 -> 198.51.100.1
+```
+
+The production prefix remains:
+
+```text
+203.0.113.0/24
+```
+
+A health-tracking script continuously probes the health target.
+
+Normal state:
+
+```text
+R2 LocalPref = 200
+R3 LocalPref = 100
+
+Best Path = R2
+```
+
+After three consecutive probe failures:
+
+```text
+R2 LocalPref = 50
+R3 LocalPref = 100
+
+Best Path = R3
+```
+
+The BGP sessions and the R2-R4 BFD session remain established during the failure.
+
+After three successful recovery probes, the primary policy is restored:
+
+```text
+R2 LocalPref = 200
+```
+
+Result:
+
+```text
+PASS
+```
+
+This test demonstrates that BGP and BFD alone do not guarantee end-to-end service reachability.
+
+An active health probe can be combined with routing policy to influence path selection based on remote reachability.
+
 ---
 
 ## Key Lessons

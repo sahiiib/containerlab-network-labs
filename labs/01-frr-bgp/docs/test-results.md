@@ -416,15 +416,324 @@ BFD improves fast failure detection between its endpoints.
 
 It does not, by itself, verify end-to-end service or application availability.
 
+# Test 3D — End-to-End Health Tracking
+
+## Objective
+
+Demonstrate a failure scenario where:
+
+```text
+Interface = UP
+BFD       = UP
+BGP       = UP
+Route     = PRESENT
+```
+
+but an end-to-end health target becomes unreachable.
+
+The goal is to detect the failure using an active probe and dynamically influence BGP path selection without tearing down the BGP session.
+
+---
+
+## Health Target
+
+A dedicated loopback was configured on R4:
+
+```text
+198.51.100.1/32
+```
+
+R1 uses a static host route to force the health probe through the primary path:
+
+```text
+198.51.100.1/32 via 10.0.12.2
+```
+
+Therefore, the health-check path is:
+
+```text
+R1 -> R2 -> R4 -> 198.51.100.1
+```
+
+The production route being influenced remains:
+
+```text
+203.0.113.0/24
+```
+
+---
+
+## Baseline
+
+The health target was reachable:
+
+```text
+5 packets transmitted
+5 packets received
+0% packet loss
+```
+
+The production prefix had two BGP paths.
+
+Primary:
+
+```text
+AS_PATH:   65001 65003
+Next-Hop:  10.0.12.2
+LocalPref: 200
+BEST
+```
+
+Backup:
+
+```text
+AS_PATH:   65002 65003
+Next-Hop:  10.0.13.2
+LocalPref: 100
+```
+
+---
+
+## Health Tracking Logic
+
+The health tracker uses:
+
+```text
+Failure threshold:  3
+Recovery threshold: 3
+```
+
+The primary inbound BGP policy normally assigns:
+
+```text
+LocalPref = 200
+```
+
+A degraded policy assigns:
+
+```text
+LocalPref = 50
+```
+
+Therefore:
+
+```text
+Healthy:
+
+R2 = 200
+R3 = 100
+R2 wins
+```
+
+and:
+
+```text
+Degraded:
+
+R2 = 50
+R3 = 100
+R3 wins
+```
+
+---
+
+## Failure Injection
+
+The health target was removed from R4:
+
+```bash
+docker exec -it clab-frr-bgp-R4 \
+ip addr del 198.51.100.1/32 dev lo
+```
+
+No BGP or BFD configuration was changed.
+
+---
+
+## Observed Health Failure
+
+The tracker observed three consecutive failed probes:
+
+```text
+probe=DOWN state=healthy failure=1
+probe=DOWN state=healthy failure=2
+probe=DOWN state=healthy failure=3
+
+HEALTH FAILURE DETECTED
+Degrading primary path...
+R2 Local Preference changed to 50
+```
+
+The health target became unreachable:
+
+```text
+3 packets transmitted
+0 packets received
+100% packet loss
+```
+
+---
+
+## Control Plane During Failure
+
+The R2-R4 BGP session remained established.
+
+R2 continued receiving:
+
+```text
+203.0.113.0/24
+```
+
+from R4.
+
+The BFD session also remained healthy:
+
+```text
+Status: up
+Diagnostics: ok
+Remote diagnostics: ok
+```
+
+Therefore:
+
+```text
+BGP = UP
+BFD = UP
+Production route = PRESENT
+Health target = DOWN
+```
+
+---
+
+## BGP Policy Change
+
+R1 continued to have both BGP paths.
+
+The primary R2 path was degraded to:
+
+```text
+AS_PATH:   65001 65003
+Next-Hop:  10.0.12.2
+LocalPref: 50
+```
+
+The R3 path remained:
+
+```text
+AS_PATH:   65002 65003
+Next-Hop:  10.0.13.2
+LocalPref: 100
+BEST
+```
+
+Unlike Tests 3A and 3C, the R2 path was not withdrawn.
+
+Instead, routing policy made the path less desirable.
+
+---
+
+## Recovery
+
+The health target was restored on R4.
+
+The tracker observed:
+
+```text
+probe=UP state=degraded success=1
+probe=UP state=degraded success=2
+probe=UP state=degraded success=3
+
+HEALTH RECOVERED
+Restoring primary policy...
+R2 Local Preference restored to 200
+```
+
+R1 returned to:
+
+```text
+AS_PATH:   65001 65003
+Next-Hop:  10.0.12.2
+LocalPref: 200
+BEST
+```
+
+The Linux kernel route returned to:
+
+```text
+203.0.113.0/24 via 10.0.12.2 dev eth1
+```
+
+BFD remained UP throughout the test.
+
+---
+
+## Result
+
+```text
+PASS
+```
+
+## Lesson
+
+Test 3D demonstrates a different failure domain from BFD.
+
+```text
+BFD
+  |
+  +-- verifies forwarding reachability between BFD endpoints
+```
+
+while:
+
+```text
+Active Health Probe
+  |
+  +-- verifies reachability of a selected remote target
+```
+
+This produces four distinct failure models in the lab:
+
+```text
+Test 3A
+Upstream routing failure
+        ->
+Route withdrawal
+```
+
+```text
+Test 3B
+Data-plane failure not detected by routing protocols
+        ->
+Blackhole
+```
+
+```text
+Test 3C
+Forwarding failure between BFD peers
+        ->
+BFD-triggered convergence
+```
+
+```text
+Test 3D
+Remote health failure beyond a healthy BGP/BFD adjacency
+        ->
+Active probe
+        ->
+Policy change
+        ->
+Path failover
+```
 ---
 
 # Comparison
 
-| Test | Interface | BGP initially | Data Plane | Detection | Result |
-|---|---|---|---|---|---|
-| 3A | Down | Fails | Fails | Link/BGP | Failover to R3 |
-| 3B | Up | Up | Failed | Not detected by BGP | Blackhole |
-| 3C | Up | Up | Failed | BFD | Failover to R3 |
+| Test | Interface | BGP | BFD | Remote Health | Detection | Action |
+|---|---|---|---|---|---|---|
+| 3A | Down | Fails upstream | N/A | N/A | Link/BGP | Route withdrawal |
+| 3B | Up | Up | N/A | Failed | None | Blackhole |
+| 3C | Up | Fails after BFD | Down | N/A | BFD | Route withdrawal |
+| 3D | Up | Up | Up | Failed | Active probe | LocalPref change |
 
 ---
 

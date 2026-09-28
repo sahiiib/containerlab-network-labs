@@ -12,6 +12,7 @@ topology:
         - ip addr add 10.0.12.1/30 dev eth1
         - ip addr add 10.0.13.1/30 dev eth2
         - ip addr add 1.1.1.1/32 dev lo
+        - ip route add 198.51.100.1/32 via 10.0.12.2 dev eth1
 
     R2:
       kind: linux
@@ -24,6 +25,7 @@ topology:
         - ip addr add 10.0.12.2/30 dev eth1
         - ip addr add 10.0.24.1/30 dev eth2
         - ip addr add 2.2.2.2/32 dev lo
+        - ip route add 198.51.100.1/32 via 10.0.24.2 dev eth2
 
     R3:
       kind: linux
@@ -48,6 +50,10 @@ topology:
         - ip addr add 10.0.34.2/30 dev eth2
         - ip addr add 4.4.4.4/32 dev lo
         - ip addr add 203.0.113.1/24 dev lo
+        - ip addr add 198.51.100.1/32 dev lo
+        - ip route add 10.0.12.0/30 via 10.0.24.1 dev eth1
+        - ip route add 10.0.13.0/30 via 10.0.34.1 dev eth2
+        - ip route add blackhole 198.51.100.0/24
 
   links:
     - endpoints: ["R1:eth1", "R2:eth1"]
