@@ -766,3 +766,359 @@ The kernel route returned to:
 ```text
 203.0.113.0/24 via 10.0.12.2 dev eth1
 ```
+
+# Test 4 — BGP Traffic Engineering
+
+This group of tests explores how BGP policy can influence outbound traffic, inbound traffic, route propagation, and provider behavior.
+
+The customer prefix used for these tests is:
+
+```text
+192.0.2.0/24
+```
+
+R1 originates the prefix toward both providers.
+
+---
+
+## Test 4A — Local Preference
+
+R1 receives the upstream production prefix through both R2 and R3.
+
+Policy:
+
+```text
+R2 LocalPref = 200
+R3 LocalPref = 100
+```
+
+R1 selects R2.
+
+This demonstrates outbound traffic engineering because Local Preference controls which exit path the local AS prefers.
+
+Result:
+
+```text
+PASS
+```
+
+---
+
+## Test 4B — AS-Path Prepending
+
+R1 advertised `192.0.2.0/24` normally through R2 and prepended AS65010 twice toward R3.
+
+R2 received:
+
+```text
+65010
+```
+
+R3 received:
+
+```text
+65010 65010 65010
+```
+
+R4 received:
+
+```text
+via R2:
+65001 65010
+
+via R3:
+65002 65010 65010 65010
+```
+
+R4 selected R2:
+
+```text
+best (AS Path)
+```
+
+Kernel route:
+
+```text
+192.0.2.0/24 via 10.0.24.1 dev eth1
+```
+
+Result:
+
+```text
+PASS
+```
+
+---
+
+## Test 4C — Reverse AS-Path Prepending
+
+The prepend policy was moved from R3 to R2.
+
+R2 received:
+
+```text
+65010 65010 65010
+```
+
+R3 received:
+
+```text
+65010
+```
+
+R4 received:
+
+```text
+via R2:
+65001 65010 65010 65010
+
+via R3:
+65002 65010
+```
+
+R4 selected R3:
+
+```text
+best (AS Path)
+```
+
+Kernel route:
+
+```text
+192.0.2.0/24 via 10.0.34.1 dev eth2
+```
+
+A normal ping sourced from R4's transit address initially failed because R1 had no return route to `10.0.34.0/30`.
+
+Using the routed production address as the source:
+
+```text
+203.0.113.1 -> 192.0.2.1
+```
+
+succeeded with zero packet loss.
+
+The resulting path was asymmetric:
+
+```text
+Request:
+R4 -> R3 -> R1
+
+Reply:
+R1 -> R2 -> R4
+```
+
+Result:
+
+```text
+PASS
+```
+
+---
+
+## Test 4D — MED
+
+### Default Behavior
+
+R3 advertised:
+
+```text
+MED = 200
+```
+
+R2 advertised:
+
+```text
+MED = 50
+```
+
+The paths were learned from different neighboring ASes:
+
+```text
+R2 = AS65001
+R3 = AS65002
+```
+
+R4 selected:
+
+```text
+R3
+best (Older Path)
+```
+
+despite R2 having the lower MED.
+
+This demonstrated that the MED values were not being used to compare these paths under the default behavior.
+
+### always-compare-med
+
+The following was enabled on R4:
+
+```text
+bgp always-compare-med
+```
+
+R4 then selected:
+
+```text
+R2
+MED = 50
+best (MED)
+```
+
+The kernel route changed to:
+
+```text
+192.0.2.0/24 via 10.0.24.1 dev eth1
+```
+
+Result:
+
+```text
+PASS
+```
+
+---
+
+## Test 4E-A — NO_EXPORT
+
+R1 attached the well-known community:
+
+```text
+no-export
+```
+
+when advertising the customer prefix to R3.
+
+R3 received:
+
+```text
+65010
+Community: no-export
+```
+
+FRR reported:
+
+```text
+not advertised to EBGP peer
+```
+
+R3 retained the route locally but did not advertise it to R4.
+
+R4 therefore received only:
+
+```text
+65001 65010
+```
+
+through R2.
+
+Result:
+
+```text
+PASS
+```
+
+---
+
+## Test 4E-B — Custom Provider Community
+
+A custom provider community was defined for the lab:
+
+```text
+65002:200
+```
+
+Its provider-defined meaning was:
+
+```text
+Prepend AS65002 twice when advertising the customer's prefix upstream.
+```
+
+R1 attached the community when sending `192.0.2.0/24` to R3.
+
+R3 received:
+
+```text
+65010
+Community: 65002:200
+```
+
+R3 matched the community with:
+
+```text
+CUST-PREPEND-2
+```
+
+and applied:
+
+```text
+set as-path prepend 65002 65002
+```
+
+R4 received:
+
+```text
+via R3:
+65002 65002 65002 65010
+Community: 65002:200
+```
+
+while the R2 path remained:
+
+```text
+65001 65010
+```
+
+R2 therefore became best due to the shorter AS path.
+
+### Causality Test
+
+The community was removed from the R1 advertisement without changing the BGP session or topology.
+
+R3 continued to receive the route:
+
+```text
+65010
+```
+
+but no longer displayed:
+
+```text
+Community: 65002:200
+```
+
+The provider route map fell through to its normal-export sequence.
+
+R4 then received:
+
+```text
+65002 65010
+```
+
+instead of:
+
+```text
+65002 65002 65002 65010
+```
+
+This demonstrated that the custom community directly triggered the provider's prepend policy.
+
+Result:
+
+```text
+PASS
+```
+
+---
+
+# Traffic Engineering Test Matrix
+
+| Test | Mechanism | Policy Effect | Result |
+|---|---|---|---|
+| 4A | Local Preference | Prefer R2 for outbound traffic | PASS |
+| 4B | AS-Path Prepend | Prefer R2 for inbound traffic | PASS |
+| 4C | Reverse Prepend | Move inbound traffic to R3 | PASS |
+| 4D | MED | Demonstrate MED comparison behavior | PASS |
+| 4E-A | NO_EXPORT | Prevent eBGP propagation through R3 | PASS |
+| 4E-B | Custom Community | Trigger provider-side AS prepend | PASS |
