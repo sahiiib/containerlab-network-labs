@@ -395,6 +395,225 @@ An active health probe can be combined with routing policy to influence path sel
 
 ---
 
+## BGP Traffic Engineering
+
+The lab also demonstrates several BGP traffic-engineering techniques using the customer prefix:
+
+```text
+192.0.2.0/24
+```
+
+R1 originates the prefix toward two upstream providers:
+
+```text
+R2 — AS65001
+R3 — AS65002
+```
+
+### Test 4A — Outbound Traffic Engineering with Local Preference
+
+R1 prefers R2 for outbound traffic:
+
+```text
+R2 LocalPref = 200
+R3 LocalPref = 100
+```
+
+Result:
+
+```text
+R1 -> R2 -> R4
+```
+
+Local Preference provides direct policy control inside the local AS.
+
+---
+
+### Test 4B — Inbound Traffic Engineering with AS-Path Prepending
+
+R1 prepends its ASN when advertising through R3.
+
+R4 receives:
+
+```text
+via R2:
+65001 65010
+
+via R3:
+65002 65010 65010 65010
+```
+
+R4 selects the shorter path through R2.
+
+Result:
+
+```text
+PASS
+```
+
+---
+
+### Test 4C — Moving Inbound Traffic to R3
+
+The prepend policy is reversed.
+
+R4 receives:
+
+```text
+via R2:
+65001 65010 65010 65010
+
+via R3:
+65002 65010
+```
+
+R4 selects R3.
+
+The resulting forwarding behavior demonstrates asymmetric routing:
+
+```text
+Inbound:
+R4 -> R3 -> R1
+
+Return:
+R1 -> R2 -> R4
+```
+
+Result:
+
+```text
+PASS
+```
+
+---
+
+### Test 4D — MED Behavior
+
+Different MED values were advertised through R2 and R3.
+
+Without `bgp always-compare-med`, R4 did not use MED to compare paths learned from different neighboring autonomous systems.
+
+Observed:
+
+```text
+R3:
+MED 200
+BEST (Older Path)
+
+R2:
+MED 50
+```
+
+After enabling:
+
+```text
+bgp always-compare-med
+```
+
+R4 selected:
+
+```text
+R2
+MED 50
+BEST (MED)
+```
+
+Result:
+
+```text
+PASS
+```
+
+This demonstrates that MED comparison behavior depends on BGP policy and neighboring-AS context.
+
+---
+
+### Test 4E-A — NO_EXPORT Community
+
+R1 advertised `192.0.2.0/24` to R3 with:
+
+```text
+Community: no-export
+```
+
+R3 installed the route locally but did not advertise it to its eBGP upstream R4.
+
+R4 therefore learned the prefix only through R2.
+
+Result:
+
+```text
+PASS
+```
+
+---
+
+### Test 4E-B — Custom Provider Community
+
+A lab-specific provider community was defined:
+
+```text
+65002:200
+```
+
+Meaning:
+
+```text
+When R3 receives this community from a customer,
+prepend AS65002 twice when advertising the route upstream.
+```
+
+R1 attached:
+
+```text
+Community: 65002:200
+```
+
+R3 matched the community and applied:
+
+```text
+set as-path prepend 65002 65002
+```
+
+R4 received:
+
+```text
+via R2:
+65001 65010
+
+via R3:
+65002 65002 65002 65010
+```
+
+Removing the community caused R3 to fall back to normal advertisement:
+
+```text
+65002 65010
+```
+
+This proved that the community itself triggered the provider policy.
+
+Result:
+
+```text
+PASS
+```
+
+---
+
+## Traffic Engineering Summary
+
+| Mechanism | Primary Use |
+|---|---|
+| Local Preference | Control outbound path inside the local AS |
+| AS-Path Prepending | Influence inbound path selection in remote ASes |
+| MED | Suggest preferred ingress to a neighboring AS |
+| BGP Community | Signal policy intent between networks |
+| NO_EXPORT | Restrict route propagation outside an AS |
+| Custom Community | Trigger provider-specific routing policy |
+
+
+---
 ## Key Lessons
 
 This lab demonstrates several important routing concepts:

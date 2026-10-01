@@ -424,3 +424,161 @@ vtysh -c "show bgp ipv4 unicast"
 ```
 
 This sequence helps avoid jumping directly to BGP configuration when the real problem may exist at another layer.
+
+# Missing ISP-B Outbound Route Map
+
+## Symptom
+
+R1 originated:
+
+```text
+192.0.2.0/24
+```
+
+and successfully advertised it to R2, but R3 did not receive the prefix.
+
+R1 showed:
+
+```text
+Advertised to:
+10.0.12.2
+```
+
+but no advertisement to:
+
+```text
+10.0.13.2
+```
+
+R3 reported:
+
+```text
+% Network not in table
+```
+
+## Root Cause
+
+The neighbor referenced:
+
+```text
+route-map ISP-B-OUT out
+```
+
+but the `ISP-B-OUT` route map itself had not been defined.
+
+Operational verification showed:
+
+```text
+BGP: 'route-map ISP-B-OUT' not found
+```
+
+## Resolution
+
+The missing route map was created:
+
+```text
+route-map ISP-B-OUT permit 10
+ match ip address prefix-list OUR-PREFIX
+ set as-path prepend 65010 65010
+!
+route-map ISP-B-OUT deny 100
+!
+```
+
+After a soft outbound refresh, R3 received the prefix.
+
+## Lesson
+
+A route map referenced by a BGP neighbor must also exist as a valid policy definition.
+
+Always verify both:
+
+```text
+neighbor configuration
+```
+
+and:
+
+```text
+show route-map
+```
+
+---
+
+# Community Configured but Not Received
+
+## Symptom
+
+R3 received `192.0.2.0/24`, but the expected custom community:
+
+```text
+65002:200
+```
+
+was not visible.
+
+R4 therefore received a normal path:
+
+```text
+65002 65010
+```
+
+instead of the expected provider-prepended path.
+
+## Investigation
+
+The R1 outbound route map was inspected using:
+
+```text
+show route-map ISP-B-OUT
+```
+
+The required community set operation was then confirmed in the runtime configuration:
+
+```text
+community 65002:200
+```
+
+Community transmission to the R3 neighbor was also explicitly enabled.
+
+## Resolution
+
+R1 applied:
+
+```text
+set community 65002:200
+```
+
+and the R3 neighbor was configured to send community attributes.
+
+After a soft outbound BGP refresh, R3 displayed:
+
+```text
+Community: 65002:200
+```
+
+and R4 received:
+
+```text
+65002 65002 65002 65010
+```
+# Transient FRR bgpd Startup Crash
+
+During a fresh Containerlab deployment, R4 initially reported:
+
+```text
+bgpd crashed in startup, signal 11
+Failed to start bgpd!
+
+## Lesson
+
+When troubleshooting community-based routing policy, validate the entire chain:
+
+```text
+1. Community is set by the sender
+2. Community transmission is enabled
+3. Receiver actually sees the community
+4. Community-list matches it
+5. Route-map applies the expected action
+6. Downstream advertisement reflects the policy
+```

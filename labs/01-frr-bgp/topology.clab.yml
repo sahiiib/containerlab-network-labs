@@ -13,6 +13,7 @@ topology:
         - ip addr add 10.0.13.1/30 dev eth2
         - ip addr add 1.1.1.1/32 dev lo
         - ip route add 198.51.100.1/32 via 10.0.12.2 dev eth1
+        - ip addr add 192.0.2.1/24 dev lo
 
     R2:
       kind: linux
