@@ -562,23 +562,175 @@ and R4 received:
 ```text
 65002 65002 65002 65010
 ```
+
 # Transient FRR bgpd Startup Crash
+
+## Symptom
 
 During a fresh Containerlab deployment, R4 initially reported:
 
 ```text
 bgpd crashed in startup, signal 11
 Failed to start bgpd!
+```
+
+BGP was temporarily unavailable even though the saved configuration had previously worked.
+
+## Observation
+
+FRR's watchdog later restarted the daemons.
+
+After the restart, `bgpd` returned to the UP state and the expected BGP adjacencies recovered without a configuration change.
+
+## Resolution
+
+No routing-policy or topology change was required.
+
+The lab was allowed to complete the FRR daemon restart and the operational state was verified again.
 
 ## Lesson
 
-When troubleshooting community-based routing policy, validate the entire chain:
+A transient daemon startup problem should not immediately be treated as a routing-policy failure.
+
+Check:
 
 ```text
-1. Community is set by the sender
-2. Community transmission is enabled
-3. Receiver actually sees the community
-4. Community-list matches it
-5. Route-map applies the expected action
-6. Downstream advertisement reflects the policy
+1. Container state
+2. FRR daemon state
+3. watchfrr restart activity
+4. BGP neighbor state after daemon recovery
+```
+
+before changing a known-good configuration.
+
+---
+
+# Maximum-Prefix Interference During Bogon Testing
+
+## Symptom
+
+During Test 5E, R1 was configured to advertise the normal customer prefix and a private test prefix.
+
+The expected bogon-filter evidence was initially missing:
+
+```text
+R1 advertised-routes = empty
+R2 received-routes   = empty
+```
+
+R2 also no longer had the legitimate customer prefix.
+
+## Investigation
+
+BGP summaries showed:
+
+R1:
+
+```text
+10.0.12.2 ... Active
+```
+
+R2:
+
+```text
+10.0.12.1 ... Idle (PfxCt)
+```
+
+The permanent security configuration from Test 5B was still active:
+
+```text
+neighbor 10.0.12.1 maximum-prefix 2 force
+```
+
+## Cause
+
+The maximum-prefix protection triggered before the bogon test could be observed cleanly.
+
+Because `force` counts received prefixes for maximum-prefix protection, the session can be terminated even when an inbound policy would later reject one of those prefixes.
+
+This mixed two different security mechanisms:
+
+```text
+Maximum-prefix protection
++
+Bogon filtering
+```
+
+and made the initial Test 5E result ambiguous.
+
+## Resolution
+
+For the isolated bogon-filter experiment only, the runtime threshold was temporarily increased:
+
+```text
+maximum-prefix 4 force
+```
+
+The BGP session was reset.
+
+R1 then advertised:
+
+```text
+10.10.10.0/24
+192.0.2.0/24
+```
+
+R2 received both advertisements but filtered only the private prefix:
+
+```text
+Total number of prefixes 2 (1 filtered)
+```
+
+The legitimate customer route remained installed.
+
+After the test, the permanent threshold was restored:
+
+```text
+maximum-prefix 2 force
+```
+
+## Lesson
+
+When several controls are active at the same time, isolate the mechanism being tested.
+
+A security test is stronger when the evidence proves which specific control caused the observed behavior.
+
+---
+
+# Test 5 Security Troubleshooting Checklist
+
+When a customer route is rejected or the session goes down, check the controls in this order:
+
+```text
+1. BGP neighbor state
+2. Maximum-prefix state / Idle (PfxCt)
+3. received-routes
+4. Bogon/private prefix match
+5. Customer prefix-list match
+6. AS-path access-list match
+7. CUSTOMER-IN route-map counters
+8. Installed BGP route
+9. Export policy on the customer
+```
+
+Useful commands:
+
+```bash
+vtysh -c "show bgp ipv4 unicast summary"
+vtysh -c "show bgp ipv4 unicast neighbors <peer> received-routes"
+vtysh -c "show bgp as-path-access-list CUSTOMER-AS"
+vtysh -c "show route-map CUSTOMER-IN"
+vtysh -c "show bgp ipv4 unicast <prefix>"
+```
+
+This makes it easier to distinguish:
+
+```text
+route rejected by policy
+```
+
+from:
+
+```text
+session terminated by maximum-prefix protection
 ```

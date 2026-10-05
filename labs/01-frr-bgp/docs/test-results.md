@@ -1122,3 +1122,430 @@ PASS
 | 4D | MED | Demonstrate MED comparison behavior | PASS |
 | 4E-A | NO_EXPORT | Prevent eBGP propagation through R3 | PASS |
 | 4E-B | Custom Community | Trigger provider-side AS prepend | PASS |
+
+---
+
+# Test 5 — BGP Route Security and Policy Hardening
+
+This milestone validates defensive routing controls on the customer-facing R1-R2 BGP session.
+
+The permanent security controls on R2 include:
+
+```text
+CUSTOMER-R1
+CUSTOMER-AS
+BOGON-V4
+maximum-prefix 2 force
+soft-reconfiguration inbound
+```
+
+---
+
+## Test 5A — Prefix Filtering
+
+### Objective
+
+Verify that R2 accepts only the authorized customer prefix even if R1's normal outbound filter is bypassed.
+
+Authorized customer prefix:
+
+```text
+192.0.2.0/24
+```
+
+### Failure Injection
+
+R1 temporarily originated and advertised:
+
+```text
+198.18.0.0/24
+```
+
+in addition to the authorized customer prefix.
+
+The temporary outbound test policy deliberately bypassed the normal `ISP-A-OUT` restriction so the unauthorized route was actually sent to R2.
+
+### Observed Behavior
+
+R1 advertised two prefixes:
+
+```text
+192.0.2.0/24
+198.18.0.0/24
+```
+
+R2 accepted:
+
+```text
+192.0.2.0/24
+```
+
+but the unauthorized route was not installed:
+
+```text
+198.18.0.0/24
+% Network not in table
+```
+
+`CUSTOMER-IN` counters confirmed that the unauthorized route reached the deny path.
+
+### Result
+
+```text
+PASS
+```
+
+### Lesson
+
+Export filtering on the customer and import filtering on the provider protect different sides of the same failure.
+
+Provider-side prefix validation remains effective even if the customer accidentally bypasses its own outbound filter.
+
+---
+
+## Test 5B — Maximum-Prefix Protection
+
+### Objective
+
+Protect R2 against excessive route advertisements from the customer.
+
+### Permanent Configuration
+
+R2:
+
+```text
+neighbor 10.0.12.1 soft-reconfiguration inbound
+neighbor 10.0.12.1 maximum-prefix 2 force
+```
+
+### Controlled Test
+
+R1 originated three prefixes:
+
+```text
+192.0.2.0/24
+198.18.0.0/24
+198.19.0.0/24
+```
+
+The maximum-prefix limit was temporarily raised to 4.
+
+With:
+
+```text
+maximum-prefix 4 force
+```
+
+the BGP session remained Established and R1 advertised all three prefixes.
+
+R1 output showed:
+
+```text
+Total number of prefixes 3
+```
+
+The limit was then reduced to:
+
+```text
+maximum-prefix 2 force
+```
+
+### Observed Behavior
+
+R2 immediately moved the customer session to:
+
+```text
+Idle (PfxCt)
+```
+
+R1 showed the peer in:
+
+```text
+Active
+```
+
+The same three-prefix advertisement was therefore accepted with a threshold of 4 but triggered protection with a threshold of 2.
+
+### Result
+
+```text
+PASS
+```
+
+### Lesson
+
+Prefix filtering validates route content.
+
+Maximum-prefix validates route volume.
+
+The two controls solve different problems and should be used together.
+
+---
+
+## Test 5C — AS-Path Filtering
+
+### Objective
+
+Verify that an otherwise authorized customer prefix is rejected if it arrives with an unexpected AS path.
+
+### Permanent Configuration
+
+R2:
+
+```text
+bgp as-path access-list CUSTOMER-AS permit ^65010$
+```
+
+The normal customer import policy requires both:
+
+```text
+Prefix:  192.0.2.0/24
+AS_PATH: ^65010$
+```
+
+### Failure Injection
+
+R1 temporarily prepended AS65020 when advertising the legitimate customer prefix toward R2.
+
+R2 received:
+
+```text
+192.0.2.0/24
+AS_PATH: 65010 65020
+```
+
+### Observed Behavior
+
+`received-routes` showed:
+
+```text
+192.0.2.0/24  ... 65010 65020
+Total number of prefixes 1 (1 filtered)
+```
+
+The route was not installed:
+
+```text
+% Network not in table
+```
+
+The BGP session remained Established.
+
+### Result
+
+```text
+PASS
+```
+
+### Lesson
+
+A prefix allowlist alone does not validate route origin/path intent.
+
+Combining prefix validation with AS-path validation provides stronger customer-edge protection.
+
+---
+
+## Test 5D — Route-Leak Prevention
+
+### Objective
+
+Verify that an upstream-learned route accidentally re-advertised by the customer is rejected by the provider.
+
+### Test Topology
+
+R1 was temporarily made to prefer the upstream production route through R3:
+
+```text
+R4 -> R3 -> R1
+```
+
+R1 therefore selected:
+
+```text
+203.0.113.0/24
+AS_PATH: 65002 65003
+LocalPref: 200
+BEST
+```
+
+R1's normal outbound protection toward R2 was temporarily bypassed so the route could be leaked.
+
+### Observed Advertisement
+
+R2 received the leaked path:
+
+```text
+203.0.113.0/24
+AS_PATH: 65010 65002 65003
+```
+
+Importantly, AS65001 was not present in that leaked path, so rejection could not be attributed to R2's own-AS loop detection.
+
+R2 reported:
+
+```text
+Total number of prefixes 2 (1 filtered)
+```
+
+The leaked path failed both:
+
+- customer prefix validation
+- customer AS-path validation
+
+### Legitimate Route Remained
+
+R2 continued to use its valid direct path from R4:
+
+```text
+203.0.113.0/24
+AS_PATH: 65003
+via 10.0.24.2
+BEST
+```
+
+The leaked path was not installed in R2's BGP table.
+
+### Result
+
+```text
+PASS
+```
+
+### Lesson
+
+Import policy at a provider edge can protect the network even when a customer accidentally leaks a route learned from another upstream.
+
+Prefix validation and AS-path validation provide complementary route-leak defenses.
+
+---
+
+## Test 5E — Bogon / Private Prefix Filtering
+
+### Objective
+
+Verify that an explicitly private/bogon advertisement is rejected while the legitimate customer prefix remains accepted.
+
+### Permanent Configuration
+
+R2:
+
+```text
+ip prefix-list BOGON-V4 seq 10 permit 10.0.0.0/8 le 32
+ip prefix-list BOGON-V4 seq 20 permit 172.16.0.0/12 le 32
+ip prefix-list BOGON-V4 seq 30 permit 192.168.0.0/16 le 32
+```
+
+`CUSTOMER-IN` evaluates bogon/private space before the authorized customer permit rule.
+
+### Failure Injection
+
+R1 temporarily originated:
+
+```text
+10.10.10.0/24
+```
+
+and advertised it together with:
+
+```text
+192.0.2.0/24
+```
+
+The first attempt also triggered the previously configured maximum-prefix protection because the session was still protected with `maximum-prefix 2 force`.
+
+For an isolated bogon-filter test, the runtime maximum-prefix threshold was temporarily raised to 4 and the session was reset.
+
+### Observed Behavior
+
+R1 advertised:
+
+```text
+10.10.10.0/24
+192.0.2.0/24
+```
+
+R2 received:
+
+```text
+10.10.10.0/24    AS_PATH 65010
+192.0.2.0/24     AS_PATH 65010
+```
+
+FRR reported:
+
+```text
+Total number of prefixes 2 (1 filtered)
+```
+
+The private prefix was not installed:
+
+```text
+10.10.10.0/24
+% Network not in table
+```
+
+The legitimate customer route remained valid:
+
+```text
+192.0.2.0/24
+AS_PATH: 65010
+valid, external, best
+```
+
+The BGP session remained Established.
+
+The `CUSTOMER-IN` bogon deny sequence was invoked during the test.
+
+### Result
+
+```text
+PASS
+```
+
+### Lesson
+
+Bogon/private filtering provides an explicit safety layer independent of customer-prefix ownership filtering.
+
+When multiple security controls are enabled simultaneously, failure tests should isolate the intended mechanism so the observed result can be attributed correctly.
+
+---
+
+# Route Security Test Matrix
+
+| Test | Control | Failure Injection | Expected Result | Result |
+|---|---|---|---|---|
+| 5A | Prefix allowlist | Unauthorized customer prefix | Route rejected, session stays up | PASS |
+| 5B | Maximum-prefix | Three prefixes with limit two | Session enters `Idle (PfxCt)` | PASS |
+| 5C | AS-path filter | Authorized prefix with `65010 65020` | Route rejected, session stays up | PASS |
+| 5D | Route-leak prevention | Upstream route leaked from R1 to R2 | Leaked path rejected; legitimate R4 path remains | PASS |
+| 5E | Bogon/private filter | `10.10.10.0/24` advertised | Bogon rejected; legitimate customer route remains | PASS |
+
+---
+
+# Test 5 Cleanup and Reproducibility
+
+After completing Test 5:
+
+- temporary customer test prefixes were removed
+- temporary outbound test route-maps were removed
+- normal `ISP-A-OUT` policy was restored
+- temporary Local Preference changes were removed
+- R2 maximum-prefix was restored to the permanent value of `2 force`
+
+The lab was then destroyed and deployed again from the saved files.
+
+Fresh-deploy validation confirmed:
+
+- BGP adjacencies returned to the expected state
+- R1 again preferred R2 for `203.0.113.0/24`
+- R2 again accepted `192.0.2.0/24`
+- `maximum-prefix 2 force` remained configured
+- `CUSTOMER-AS` remained configured
+- `BOGON-V4` remained configured
+- temporary test configuration did not persist
+
+Result:
+
+```text
+PASS
+```

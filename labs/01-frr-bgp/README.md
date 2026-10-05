@@ -614,6 +614,52 @@ PASS
 
 
 ---
+
+## BGP Route Security and Policy Hardening
+
+This milestone validates defensive BGP controls on the customer-provider edge.
+
+Implemented controls:
+
+- Prefix allowlisting for customer advertisements
+- Maximum-prefix protection
+- AS-path validation
+- Route-leak prevention
+- Bogon/private prefix filtering
+
+### Security Policy on R2
+
+The customer-facing BGP session from R1 is protected using multiple independent controls:
+
+- `CUSTOMER-R1` permits only the authorized customer prefix `192.0.2.0/24`
+- `CUSTOMER-AS` permits only the direct customer AS path `^65010$`
+- `BOGON-V4` rejects RFC1918/private address space
+- `maximum-prefix 2 force` protects against excessive prefix advertisements
+- `soft-reconfiguration inbound` allows verification of rejected received routes
+
+The inbound policy follows this order:
+
+1. Reject bogon/private prefixes
+2. Permit the authorized customer prefix with the expected AS path
+3. Deny everything else
+
+This provides defense in depth against accidental leaks, unauthorized announcements, and malformed routing policy.
+
+### Route Security Test Matrix
+
+| Test | Control | Expected Protection | Result |
+|---|---|---|---|
+| 5A | Prefix filtering | Reject unauthorized customer prefixes | PASS |
+| 5B | Maximum-prefix | Tear down the session when the configured prefix limit is exceeded | PASS |
+| 5C | AS-path filtering | Reject an authorized prefix with an unexpected AS path | PASS |
+| 5D | Route-leak prevention | Reject an upstream-learned route leaked back toward a provider | PASS |
+| 5E | Bogon/private filtering | Reject RFC1918/private advertisements while keeping the legitimate customer prefix | PASS |
+
+After cleanup, the lab was destroyed and deployed again from the saved configuration. BGP sessions, normal route exchange, maximum-prefix protection, AS-path validation, and bogon filtering all returned correctly.
+
+**Reproducibility:** PASS
+
+---
 ## Key Lessons
 
 This lab demonstrates several important routing concepts:
@@ -630,11 +676,11 @@ This lab demonstrates several important routing concepts:
 
 ## Next Steps
 
-Future extensions of this lab will include:
+Future extensions of this lab may include:
 
-- End-to-end health tracking
-- Conditional routing based on probe results
-- Additional BFD experiments
-- Prefix filtering
-- Controlled route advertisement
-- More detailed convergence measurement
+- RPKI origin validation
+- More complete IPv4 bogon/reserved-prefix filtering
+- IPv6 BGP policy and filtering
+- Graceful restart and additional convergence experiments
+- Route-policy scaling with peer-groups and reusable policy objects
+- Automated validation of BGP policy with test scripts
